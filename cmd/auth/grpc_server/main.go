@@ -2,55 +2,53 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"flag"
 	"log"
 	"net"
 
+	"github.com/Dashinamzh/auth/intenal/config"
+	"github.com/Dashinamzh/auth/intenal/config/env"
+	"github.com/jackc/pgx/v4/pgxpool"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
-	"google.golang.org/protobuf/types/known/timestamppb"
-
-	desc "github.com/Dashinamzh/auth/pkg/auth_v1"
-	"github.com/brianvoe/gofakeit"
 )
 
-const grpc_port = 50051
-
-type server struct {
-	desc.UnimplementedAuthV1Server
-}
-
-// Get\
-func (s *server) Get(ctx context.Context, req *desc.GetRequest) (*desc.GetResponse, error) {
-	log.Printf("Auth id: %d")
-
-	return &desc.GetResponse{
-		User: &desc.User{
-			Id: req.GetId(),
-			Info: &desc.UserInfo{
-				Name:  gofakeit.Name(),
-				Email: gofakeit.Email(),
-			},
-			CreatedAt: timestamppb.New(gofakeit.Date()),
-			UpdatedAt: timestamppb.New(gofakeit.Date()),
-		},
-	}, nil
-}
-
-/*func (s *server) Create(ctx context.Context, req *desc.CreateRequest) (*desc.CreateResponse, error){
-	log.Printf("Created New User")
-}*/
-
 func main() {
-	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", grpc_port))
+	flag.Parse()
+	ctx := context.Background()
+
+	err := config.Load("configPath")
 	if err != nil {
-		log.Fatalf("listen error")
+		log.Fatalf("failed to load config: %v", err)
 	}
-	s := grpc.NewServer() // создаем сервер
+
+	grpcConfig, err := env.NewGRPCConfig()
+	if err != nil {
+		log.Fatalf("failed to get grpc config: %v", err)
+	}
+
+	pgConfig, err := env.NewPGConfig()
+	if err != nil {
+		log.Fatalf("failed to get postgres config: %v", err)
+	}
+
+	lis, err := net.Listen("tcp", grpcConfig.Address())
+	if err != nil {
+		log.Fatalf("failed to listen: %v", err)
+	}
+
+	pool, err := pgxpool.Connect(ctx, pgConfig.DSN())
+	if err != nil {
+		log.Fatalf("failed to connect database %f", err)
+	}
+	defer pool.Close()
+
+	s := grpc.NewServer()
 	reflection.Register(s)
-	desc.RegisterAuthV1Server(s, &server{})
+
+	log.Printf("server listening at: %d", lis.Addr())
 
 	if err = s.Serve(lis); err != nil {
-		log.Fatalf("is bad")
+		log.Fatalf("failed to serve %v", err)
 	}
 }
